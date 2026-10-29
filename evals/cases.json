@@ -1,0 +1,31 @@
+{
+  "_note": "Pre-registered 2026-10-29 before any live Qloo run. Do not edit after results exist; add a new versioned file instead.",
+  "version": 1,
+  "category": "a new consumer brand",
+  "audiences": [
+    {
+      "id": "A",
+      "label": "Young hip-hop and streetwear fans",
+      "anchors": ["Travis Scott", "Kendrick Lamar", "Nike"],
+      "ageBuckets": ["24_and_younger", "25_to_29"]
+    },
+    {
+      "id": "B",
+      "label": "Older coastal and outdoors shoppers",
+      "anchors": ["Jimmy Buffett", "L.L.Bean", "Patagonia"],
+      "ageBuckets": ["55_and_older"]
+    },
+    {
+      "id": "C",
+      "label": "Cozy gamers and anime fans",
+      "anchors": ["Stardew Valley", "Animal Crossing", "Studio Ghibli"]
+    }
+  ],
+  "pairs": [["A", "B"], ["A", "C"], ["B", "C"]],
+  "names": [
+    "Tidal", "Utopia", "Euphoria", "Hollow", "Ember", "Mercury", "Nova", "Apex",
+    "Phoenix", "Atlas", "Halo", "Echo", "Velvet", "Juniper", "Saturn", "Drift",
+    "Zorvexa", "Quillory", "Brumelo", "Tavanti"
+  ],
+  "_names_note": "16 common words likely to have namesakes + 4 coined strings expected to be clear."
+}

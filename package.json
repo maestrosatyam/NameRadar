@@ -11,7 +11,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "mock:qloo": "tsx scripts/mock_qloo_server.ts",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "eval": "tsx --conditions=react-server scripts/eval_ablation.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",
