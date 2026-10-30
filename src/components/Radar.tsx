@@ -38,7 +38,7 @@ interface Props {
 }
 
 export function Radar({ scan, size = 320, scanning, selectedId, onSelect }: Props) {
-  const R = size / 2 - 28;
+  const R = size / 2 - (size >= 140 ? 28 : 4);
   const c = size / 2;
   const sector = (2 * Math.PI) / DOMAINS.length;
 
@@ -60,6 +60,7 @@ export function Radar({ scan, size = 320, scanning, selectedId, onSelect }: Prop
   }, [scan, R, c, sector]);
 
   const labelled = new Set(scan?.namesakes.slice(0, 3).map((n) => n.id));
+  const showLabels = size >= 140; // tiny "scanning" radars would overprint their domain labels
 
   return (
     <svg
@@ -94,7 +95,7 @@ export function Radar({ scan, size = 320, scanning, selectedId, onSelect }: Prop
         return (
           <g key={d.label}>
             <line x1={c} y1={c} x2={c + Math.cos(a) * R} y2={c + Math.sin(a) * R} stroke="var(--line)" />
-            <text
+            {showLabels && <text
               x={c + Math.cos(la) * (R + 15)}
               y={c + Math.sin(la) * (R + 15)}
               fill="var(--ink-3)"
@@ -104,7 +105,7 @@ export function Radar({ scan, size = 320, scanning, selectedId, onSelect }: Prop
               style={{ letterSpacing: "0.06em", textTransform: "uppercase" }}
             >
               {d.label}
-            </text>
+            </text>}
           </g>
         );
       })}
