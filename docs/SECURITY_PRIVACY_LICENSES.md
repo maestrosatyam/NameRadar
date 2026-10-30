@@ -40,7 +40,7 @@
 
 ## Abuse and cost controls
 
-- Per-IP token buckets per route (run 3/min, burst 6; search 40/min; inspect 6/min; baseline
+- Per-IP token buckets per route (run 6/min, burst 12; search 40/min; inspect 6/min; baseline
   4/min). They are in-memory, so per-instance on serverless: best effort, documented.
 - Global daily run cap (`DAILY_RUN_CAP`, default 1500).
 - Per-run Qloo call budget (120), at most 12 agent-screened names, at most 8 LLM turns, 90 s LLM
