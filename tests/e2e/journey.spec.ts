@@ -28,12 +28,12 @@ test("audience flip re-scores the same names for a contrasting audience", async 
   await page.getByRole("button", { name: /Energy drink/ }).click();
   await page.getByRole("checkbox", { name: /agent find clean/ }).uncheck();
   await page.getByRole("button", { name: "Scan names" }).click();
-  await expect(page.getByRole("heading", { name: "Utopia", level: 3, exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Euphoria", level: 3, exact: true })).toBeVisible();
   await page.getByRole("button", { name: /Re-score for this audience/ }).click();
-  const tabB = page.getByRole("tab", { name: /Coastal boomers/ });
+  const tabB = page.getByRole("tab", { name: /Cozy gamers/ });
   await expect(tabB).toBeVisible();
   await expect(tabB).toHaveAttribute("aria-selected", "true");
-  await page.getByRole("tab", { name: /Young hip-hop fans/ }).click();
+  await page.getByRole("tab", { name: /Young hip-hop/ }).click();
   await expect(page.getByRole("heading", { name: "Tidal", level: 3, exact: true })).toBeVisible();
 });
 

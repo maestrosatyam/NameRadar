@@ -10,6 +10,7 @@ const Body = z.object({
     id: z.string().regex(/^[0-9A-F-]{36}$/i),
     name: z.string().max(200),
     type: z.enum(INSIGHTS_ENTITY_TYPES),
+    knownFor: z.array(z.string().max(80)).max(12).optional(),
   }),
   audience: AudienceInputSchema,
 });

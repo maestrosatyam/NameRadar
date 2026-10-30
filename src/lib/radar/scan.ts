@@ -1,7 +1,7 @@
 import type { QlooClient } from "../qloo/client";
 import type { QueryParams } from "../qloo/types";
 import { calibrate, estimateRank, salienceFromRank } from "./calibrate";
-import { DOMAIN_WEIGHT, parseAffinities, parseEntities, resultsArray } from "./entities";
+import { curateTags, DOMAIN_WEIGHT, parseAffinities, parseEntities, resultsArray } from "./entities";
 import { matchName, normalize, squash } from "./match";
 import type {
   AudienceInput,
@@ -226,18 +226,30 @@ function parseDemographics(body: unknown): DemographicSkew | undefined {
 
 export async function inspectCollision(
   client: QlooClient,
-  entity: { id: string; name: string; type: string },
+  entity: { id: string; name: string; type: string; knownFor?: string[] },
   audience: ResolvedAudience,
 ): Promise<CollisionDetail> {
-  const [tagsBody, demoBody, audDemoBody] = await Promise.all([
-    client.get("/v2/insights", { "filter.type": "urn:tag", "signal.interests.entities": [entity.id], take: 12 }).catch(() => undefined),
+  const [tagsBody, demoBody, audDemoBody, entityBody] = await Promise.all([
+    client
+      .get("/v2/insights", {
+        "filter.type": "urn:tag",
+        "signal.interests.entities": [entity.id],
+        "filter.tag.types": ["urn:tag:genre:media", "urn:tag:keyword:media"],
+        take: 12,
+      })
+      .catch(() => undefined),
     client.get("/v2/insights", { "filter.type": "urn:demographics", "signal.interests.entities": [entity.id] }).catch(() => undefined),
     audience.anchors.length
       ? client
           .get("/v2/insights", { "filter.type": "urn:demographics", "signal.interests.entities": audience.anchors.map((a) => a.id) })
           .catch(() => undefined)
       : Promise.resolve(undefined),
+    entity.knownFor?.length ? Promise.resolve(undefined) : client.get("/entities", { entity_ids: entity.id }).catch(() => undefined),
   ]);
+  const knownFor =
+    entity.knownFor?.length
+      ? entity.knownFor
+      : curateTags(((resultsArray(entityBody, "entities")[0] as { tags?: { name?: string; type?: string }[] } | undefined)?.tags) ?? []);
   const tags = resultsArray(tagsBody, "tags")
     .map((t) => t as { id?: string; tag_id?: string; name?: string; type?: string; subtype?: string })
     .filter((t) => (t.id ?? t.tag_id) && t.name)
@@ -246,6 +258,7 @@ export async function inspectCollision(
     entityId: entity.id,
     name: entity.name,
     type: entity.type,
+    knownFor,
     tags,
     demographics: parseDemographics(demoBody),
     audienceDemographics: parseDemographics(audDemoBody),

@@ -57,6 +57,28 @@ export const DOMAIN_WEIGHT: Record<string, number> = {
   "urn:entity:destination": 0.4,
 };
 
+const AGE_TAG = /^\d{2}-\d{2}$|^\d{2}\+$/;
+
+/** Prefer Qloo-curated and genre tags, drop age-bucket tags, dedupe, cap. */
+export function curateTags(tags: { name?: string; type?: string }[], max = 6): string[] {
+  const score = (t: { type?: string }) => {
+    const ty = (t.type ?? "").toLowerCase();
+    if (ty.includes("genre")) return 0;
+    if (ty.endsWith(":qloo") || ty.includes("tag:qloo") || ty === "qloo") return 1;
+    return 2;
+  };
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of [...tags].filter((t) => t.name && !AGE_TAG.test(t.name)).sort((a, b) => score(a) - score(b))) {
+    const key = t.name!.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(t.name!);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
 export function resultsArray(body: unknown, key: string): unknown[] {
   const results = (body as { results?: unknown })?.results;
   if (Array.isArray(results)) return results;
@@ -84,6 +106,7 @@ export function parseEntities(body: unknown, key = "entities"): ResolvedEntity[]
       popularity: e.popularity,
       disambiguation: e.disambiguation ?? e.properties?.short_description ?? e.properties?.address,
       imageUrl: e.properties?.image?.url,
+      knownFor: curateTags(e.tags ?? []),
     });
   }
   return out;

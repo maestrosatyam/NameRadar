@@ -62,7 +62,10 @@ export function rankText(n: ScoredNamesake): string {
   const domain = (DOMAIN_LABEL[n.type] ?? "items").toLowerCase();
   const plural = domain === "music" ? "artists" : domain === "tv" ? "TV shows" : domain === "film" ? "films" : domain === "person" ? "people" : `${domain}s`;
   if (n.audienceRank === null) return "no audience rank from Qloo";
-  if (n.rankBeyondSample || n.audienceRank > 5000) return `outside this audience's top ${n.rankBeyondSample && n.audienceRank < 5000 ? "1,000" : "5,000"} ${plural}`;
+  if (n.rankBeyondSample || n.audienceRank > 5000) {
+    const sampled = n.type === "urn:entity:brand" || n.type === "urn:entity:place" ? "5,000" : "1,000";
+    return `outside this audience's top ${sampled} ${plural}`;
+  }
   return `≈ #${n.audienceRank.toLocaleString("en-US")} of this audience's ${plural}`;
 }
 
@@ -168,7 +171,7 @@ export default function NameRadarApp() {
       const res = await fetch("/api/inspect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entity: { id: n.id, name: n.name, type: n.type }, audience: activeAudience }),
+        body: JSON.stringify({ entity: { id: n.id, name: n.name, type: n.type, knownFor: n.knownFor ?? [] }, audience: activeAudience }),
       });
       const body = (await res.json()) as { detail?: CollisionDetail; calls?: QlooCallRecord[] };
       if (body.detail) setDetails((d) => ({ ...d, [n.id]: body.detail! }));
@@ -752,8 +755,18 @@ function CollisionPanel({
           {loading && <p className="mt-2 text-sm text-ink-3">Asking Qloo…</p>}
           {detail && (
             <>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {detail.tags.slice(0, 12).map((t) => (
+              <p className="mt-2 text-[11px] text-ink-3">Known for (its Qloo tags)</p>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {(detail.knownFor ?? []).map((t) => (
+                  <span key={t} className="rounded-md border border-line-2 bg-panel-2 px-2 py-0.5 text-xs text-ink">
+                    {t}
+                  </span>
+                ))}
+                {!detail.knownFor?.length && <span className="text-sm text-ink-3">No tags returned.</span>}
+              </div>
+              <p className="mt-3 text-[11px] text-ink-3">Its fans also gravitate to (Qloo taste analysis)</p>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {detail.tags.slice(0, 10).map((t) => (
                   <span key={t.id} className="rounded-md border border-line px-2 py-0.5 text-xs text-ink-2">
                     {t.name}
                   </span>

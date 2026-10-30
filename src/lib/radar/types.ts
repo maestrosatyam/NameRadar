@@ -39,6 +39,8 @@ export interface ResolvedEntity {
   popularity?: number;
   disambiguation?: string;
   imageUrl?: string;
+  /** The entity's own Qloo tags (curated: Qloo/genre tags first, no age buckets). */
+  knownFor?: string[];
 }
 
 export interface ResolvedAudience {
@@ -86,6 +88,9 @@ export interface CollisionDetail {
   entityId: string;
   name: string;
   type: string;
+  /** What the namesake itself is known for: its own Qloo tags. */
+  knownFor: string[];
+  /** Qloo taste analysis (urn:tag), restricted to media genres/keywords: what its fans also gravitate to. */
   tags: { id: string; name: string; type?: string }[];
   demographics?: DemographicSkew;
   audienceDemographics?: DemographicSkew;
