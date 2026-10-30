@@ -20,6 +20,30 @@ const ALLOWED_PATHS = new Set([
 
 const RETRYABLE = new Set([429, 500, 502, 503, 504]);
 
+/**
+ * Process-wide cap on in-flight upstream requests. The hackathon key is rate
+ * limited (live: bursts of ~12 concurrent calls drew 429s), and several visitors
+ * may run scans at once, so every client instance shares this gate.
+ */
+class Gate {
+  private active = 0;
+  private readonly queue: (() => void)[] = [];
+  constructor(private readonly limit: number) {}
+  async run<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.active >= this.limit) await new Promise<void>((r) => this.queue.push(r));
+    this.active++;
+    try {
+      return await fn();
+    } finally {
+      this.active--;
+      this.queue.shift()?.();
+    }
+  }
+}
+const sharedGate = new Gate(Math.max(1, Number(process.env.QLOO_MAX_INFLIGHT ?? 4)));
+/** Identical concurrent requests share one upstream call. */
+const inflight = new Map<string, Promise<unknown>>();
+
 export interface QlooClientOptions {
   apiKey?: string;
   baseUrl?: string;
@@ -92,7 +116,7 @@ export class QlooClient {
     this.baseUrl = baseUrl;
     this.apiKey = apiKey;
     this.timeoutMs = opts.timeoutMs ?? 15_000;
-    this.maxAttempts = opts.maxAttempts ?? 3;
+    this.maxAttempts = opts.maxAttempts ?? 4;
     this.callBudget = opts.callBudget ?? 40;
     this.cache = opts.cache ?? sharedCache;
     this.fetchImpl = opts.fetchImpl ?? fetch;
@@ -152,6 +176,22 @@ export class QlooClient {
       return hit as T;
     }
 
+    const pending = inflight.get(cacheKey);
+    if (pending) {
+      const body = await pending;
+      this.record({ path, params: serialized, status: 200, ok: true, cached: true, latencyMs: 0, resultCount: countResults(body), attempts: 0 });
+      return body as T;
+    }
+    const promise = this.fetchUpstream<T>(path, url, serialized, cacheKey);
+    inflight.set(cacheKey, promise);
+    try {
+      return await promise;
+    } finally {
+      inflight.delete(cacheKey);
+    }
+  }
+
+  private async fetchUpstream<T>(path: string, url: URL, serialized: Record<string, string>, cacheKey: string): Promise<T> {
     if (this.upstreamCalls >= this.callBudget) {
       throw new QlooError("BUDGET", `Per-run Qloo call budget (${this.callBudget}) exhausted.`);
     }
@@ -164,12 +204,14 @@ export class QlooClient {
       attempt++;
       let res: Response;
       try {
-        res = await this.fetchImpl(url, {
-          method: "GET",
-          headers: { "X-Api-Key": this.apiKey, Accept: "application/json" },
-          signal: AbortSignal.timeout(this.timeoutMs),
-          cache: "no-store",
-        });
+        res = await sharedGate.run(() =>
+          this.fetchImpl(url, {
+            method: "GET",
+            headers: { "X-Api-Key": this.apiKey, Accept: "application/json" },
+            signal: AbortSignal.timeout(this.timeoutMs),
+            cache: "no-store",
+          }),
+        );
       } catch (err) {
         const timedOut = (err as Error)?.name === "TimeoutError" || (err as Error)?.name === "AbortError";
         lastError = new QlooError(timedOut ? "TIMEOUT" : "NETWORK", timedOut ? "Qloo request timed out." : "Could not reach Qloo.");
@@ -210,7 +252,8 @@ export class QlooClient {
       const text = (await res.text().catch(() => "")).slice(0, 300);
       lastError = mapError(res.status, text, path, serialized["filter.type"]);
       if (RETRYABLE.has(res.status) && attempt < this.maxAttempts) {
-        const wait = Math.min(retryAfterMs(res) ?? 400 * 2 ** (attempt - 1), 5_000);
+        const backoff = (res.status === 429 ? 1000 : 400) * 2 ** (attempt - 1) * (0.8 + Math.random() * 0.4);
+        const wait = Math.min(retryAfterMs(res) ?? backoff, 8_000);
         await this.sleep(wait);
         continue;
       }

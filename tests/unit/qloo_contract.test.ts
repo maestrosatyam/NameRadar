@@ -137,7 +137,7 @@ describe("error handling, retries and budgets", () => {
     const fetchImpl = vi.fn(async () => (n++ === 0 ? jsonResponse({}, 503, { "retry-after": "9999" }) : jsonResponse({ results: [] })));
     const client = makeClient(fetchImpl as unknown as typeof fetch, { sleep: async (ms) => void sleeps.push(ms) });
     await client.get("/search", { query: "x" });
-    expect(sleeps[0]).toBeLessThanOrEqual(5000);
+    expect(sleeps[0]).toBeLessThanOrEqual(8000);
   });
 
   it("gives up after maxAttempts on persistent 429 with a RATE_LIMITED error", async () => {
@@ -178,6 +178,21 @@ describe("error handling, retries and budgets", () => {
     await client.get("/search", { take: 3, query: "x" }); // param order must not matter
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(client.calls.map((c) => c.cached)).toEqual([false, true]);
+  });
+
+  it("coalesces identical concurrent requests into one upstream call", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const fetchImpl = vi.fn(async () => {
+      await gate;
+      return jsonResponse({ results: [] });
+    });
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    const a = client.get("/search", { query: "same" });
+    const b = client.get("/search", { query: "same" });
+    release();
+    await Promise.all([a, b]);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("enforces a per-run upstream call budget", async () => {
