@@ -10,7 +10,7 @@ export async function GET() {
       qlooBaseUrl: process.env.QLOO_API_URL ?? "https://hackathon.api.qloo.com",
       llmConfigured: Boolean(process.env.ANTHROPIC_API_KEY),
       model: AGENT_MODEL,
-      commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? null,
+      commit: (process.env.GIT_COMMIT ?? process.env.VERCEL_GIT_COMMIT_SHA)?.slice(0, 7) ?? null,
       time: new Date().toISOString(),
     },
     { headers: { "Cache-Control": "no-store" } },
