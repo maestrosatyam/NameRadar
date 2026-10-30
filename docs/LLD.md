@@ -73,23 +73,28 @@ Names are normalised (NFKD, lowercase, punctuation stripped, `&`→`and`, leadin
 
 Search hits that match none of these rules are discarded, so they are not treated as namesakes.
 
-## Scoring (`src/lib/radar/scan.ts`)
+## Scoring (`src/lib/radar/scan.ts`, `calibrate.ts`)
 
 ```
-heat     = similarity × domainWeight × (0.7 × audienceAffinity + 0.3 × popularity)
-verdict  = red if max heat ≥ 0.50, amber if ≥ 0.25, else green
+rank      = estimated rank of the namesake in THIS audience's own Qloo ranking for its domain
+            (raw query.affinity placed on a live calibration curve: Insights pages 1, 4, 20 (+100) of take=50)
+salience  = clamp(1 − log10(rank/25) / log10(5000/25))        # 1 at rank ≤25, 0 at rank ≥5,000
+fame      = clamp((popularity − 0.8) / 0.2)                   # popularity is a percentile; most hits are >0.8
+heat      = similarity × domainWeight × (0.75 × salience + 0.25 × fame)
+verdict   = red if max heat ≥ 0.45, amber if ≥ 0.20, else green
 ```
 
-- `audienceAffinity` is Qloo `query.affinity` for that namesake under the audience's signals.
-  If Qloo returns no score, it is treated as 0 and a note is added; it is never imputed as hot.
-- `popularity` is Qloo entity popularity (0–1).
-- `domainWeight` is a fixed, documented prior for how directly a domain competes with a new
-  brand: brand 1.0, place 0.85, music 0.75, podcast/TV/film/game 0.7, person 0.6, book 0.55,
-  destination 0.4.
-- Because popularity contributes up to 0.3, a world-famous namesake can never be fully green even
-  for an audience that doesn't care about it. That is intentional: it is still crowded.
+- Why rank and not raw affinity: raw affinity is compressed (top-50 ≈ 0.9, rank 5,000 ≈ 0.7; see
+  [QLOO_API_CONFORMANCE.md](QLOO_API_CONFORMANCE.md#calibration-why-raw-affinity-is-not-used-directly)).
+- A missing affinity or calibration gives `salience = null`, which is treated as 0 with a visible note.
+  It is never imputed as hot.
+- `domainWeight` is a fixed, documented prior: brand 1.0, place 0.85 (×0.6 without a launch
+  region, because a same-named bar abroad matters little), music 0.75, podcast/TV/film/game 0.7,
+  person 0.6, book 0.55, destination 0.4.
+- Fame contributes at most 0.25, so a world-famous namesake the audience ignores lands in amber
+  ("crowded"), not green.
 
-The UI shows every term of this formula for any namesake.
+The UI shows every term for any namesake.
 
 ## Agent tools (`src/lib/radar/agent.ts`)
 
