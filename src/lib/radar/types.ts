@@ -59,6 +59,12 @@ export interface Namesake extends ResolvedEntity {
 export interface ScoredNamesake extends Namesake {
   /** Qloo query.affinity of this namesake for the target audience (null = Qloo returned no score). */
   audienceAffinity: number | null;
+  /** Estimated rank of this namesake within the audience's own Qloo ranking for its domain. */
+  audienceRank: number | null;
+  /** True when the rank was extrapolated below the deepest calibration sample. */
+  rankBeyondSample: boolean;
+  /** 0..1 from audienceRank (top 25 → 1, 5,000+ → 0). */
+  salience: number | null;
   /** Domain proximity between the user's category and the namesake's domain (0..1). */
   proximity: number;
   heat: number; // 0..1

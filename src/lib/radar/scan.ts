@@ -1,5 +1,6 @@
 import type { QlooClient } from "../qloo/client";
 import type { QueryParams } from "../qloo/types";
+import { calibrate, estimateRank, salienceFromRank } from "./calibrate";
 import { DOMAIN_WEIGHT, parseAffinities, parseEntities, resultsArray } from "./entities";
 import { matchName, normalize, squash } from "./match";
 import type {
@@ -14,8 +15,8 @@ import type {
   Verdict,
 } from "./types";
 
-export const HEAT_RED = 0.5;
-export const HEAT_AMBER = 0.25;
+export const HEAT_RED = 0.45;
+export const HEAT_AMBER = 0.2;
 
 export function bandFor(heat: number): Verdict {
   return heat >= HEAT_RED ? "red" : heat >= HEAT_AMBER ? "amber" : "green";
@@ -120,13 +121,22 @@ export async function findNamesakes(
 /* Audience-conditional scoring                                        */
 /* ------------------------------------------------------------------ */
 
-export function heatOf(n: { similarity: number; type: string; popularity?: number }, affinity: number | null): number {
-  const domain = DOMAIN_WEIGHT[n.type] ?? 0.5;
-  const pop = Math.max(0, Math.min(1, n.popularity ?? 0));
-  const aff = affinity === null ? 0 : Math.max(0, Math.min(1, affinity));
-  // Audience affinity dominates; general popularity is a smaller term so a
-  // globally famous namesake the audience doesn't care about cools down.
-  const prominence = 0.7 * aff + 0.3 * pop;
+/** Popularity is a percentile and most findable entities are above 0.8, so only the top band counts. */
+export function popularityBoost(popularity?: number): number {
+  return Math.max(0, Math.min(1, ((popularity ?? 0) - 0.8) / 0.2));
+}
+
+export function domainWeightFor(type: string, audience?: { region?: string }): number {
+  const w = DOMAIN_WEIGHT[type] ?? 0.5;
+  // A same-named bar on another continent matters little unless you named a launch region.
+  return type === "urn:entity:place" && !audience?.region ? Number((w * 0.6).toFixed(3)) : w;
+}
+
+export function heatOf(n: { similarity: number; type: string; popularity?: number }, salience: number | null, domainWeight?: number): number {
+  const domain = domainWeight ?? DOMAIN_WEIGHT[n.type] ?? 0.5;
+  const s = salience === null ? 0 : Math.max(0, Math.min(1, salience));
+  // How much THIS audience cares dominates; global fame adds a smaller floor.
+  const prominence = 0.75 * s + 0.25 * popularityBoost(n.popularity);
   return Number((n.similarity * domain * prominence).toFixed(4));
 }
 
@@ -141,21 +151,22 @@ export async function scoreForAudience(
     list.push(n);
     byType.set(n.type, list);
   }
+  const signals = audienceSignals(audience);
   const affinity = new Map<string, number>();
+  const rankOf = new Map<string, { rank: number; beyondSample: boolean }>();
   await pool([...byType.entries()], 4, async ([type, list]) => {
     const ids = list
       .sort((a, b) => b.similarity - a.similarity || (b.popularity ?? 0) - (a.popularity ?? 0))
       .slice(0, 25)
       .map((n) => n.id);
-    const params: QueryParams = {
-      "filter.type": type,
-      ...audienceSignals(audience),
-      "filter.results.entities": ids,
-      take: ids.length,
-    };
+    const params: QueryParams = { "filter.type": type, ...signals, "filter.results.entities": ids, take: ids.length };
     try {
-      const body = await client.get("/v2/insights", params);
-      for (const [id, a] of parseAffinities(body)) affinity.set(id, a);
+      const [body, cal] = await Promise.all([client.get("/v2/insights", params), calibrate(client, type, signals)]);
+      for (const [id, a] of parseAffinities(body)) {
+        affinity.set(id, a);
+        const r = estimateRank(a, cal);
+        if (r) rankOf.set(id, r);
+      }
     } catch {
       // leave unscored; surfaced as audienceAffinity=null
     }
@@ -163,8 +174,20 @@ export async function scoreForAudience(
   return namesakes
     .map((n) => {
       const a = affinity.has(n.id) ? (affinity.get(n.id) as number) : null;
-      const heat = heatOf(n, a);
-      return { ...n, audienceAffinity: a, proximity: DOMAIN_WEIGHT[n.type] ?? 0.5, heat, band: bandFor(heat) };
+      const r = rankOf.get(n.id);
+      const salience = r ? salienceFromRank(r.rank) : null;
+      const proximity = domainWeightFor(n.type, audience);
+      const heat = heatOf(n, salience, proximity);
+      return {
+        ...n,
+        audienceAffinity: a,
+        audienceRank: r?.rank ?? null,
+        rankBeyondSample: r?.beyondSample ?? false,
+        salience,
+        proximity,
+        heat,
+        band: bandFor(heat),
+      };
     })
     .sort((a, b) => b.heat - a.heat);
 }
@@ -174,8 +197,8 @@ export function summarize(name: string, scored: ScoredNamesake[], variants: stri
   const heat = top?.heat ?? 0;
   const notes: string[] = [];
   if (scored.length === 0) notes.push("No namesakes found in Qloo's cultural graph for this name or its spelling variants.");
-  const unscored = scored.filter((s) => s.audienceAffinity === null).length;
-  if (unscored) notes.push(`${unscored} namesake(s) had no audience affinity score from Qloo; they are rated on popularity only.`);
+  const unscored = scored.filter((s) => s.salience === null).length;
+  if (unscored) notes.push(`${unscored} namesake(s) had no audience rank from Qloo; they are rated on popularity only.`);
   return { name, verdict: bandFor(heat), heat, namesakes: scored.slice(0, 12), searchedVariants: variants, notes };
 }
 

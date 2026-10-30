@@ -22,19 +22,6 @@ const DOMAIN_LABEL: Record<string, string> = {
   "urn:entity:videogame": "Game",
   "urn:entity:video_game": "Game",
 };
-const DOMAIN_WEIGHT: Record<string, number> = {
-  "urn:entity:brand": 1,
-  "urn:entity:place": 0.85,
-  "urn:entity:artist": 0.75,
-  "urn:entity:podcast": 0.7,
-  "urn:entity:tv_show": 0.7,
-  "urn:entity:movie": 0.7,
-  "urn:entity:videogame": 0.7,
-  "urn:entity:video_game": 0.7,
-  "urn:entity:person": 0.6,
-  "urn:entity:book": 0.55,
-  "urn:entity:destination": 0.4,
-};
 const MATCH_LABEL: Record<string, string> = {
   exact: "Exact name",
   contains_word: "Shares a word",
@@ -69,6 +56,14 @@ function Bar({ value, color = "var(--blue)", label }: { value: number | null | u
       <span className="w-9 text-right font-mono text-[11px] text-ink-2">{v === null ? "n/a" : v.toFixed(2)}</span>
     </div>
   );
+}
+
+export function rankText(n: ScoredNamesake): string {
+  const domain = (DOMAIN_LABEL[n.type] ?? "items").toLowerCase();
+  const plural = domain === "music" ? "artists" : domain === "tv" ? "TV shows" : domain === "film" ? "films" : domain === "person" ? "people" : `${domain}s`;
+  if (n.audienceRank === null) return "no audience rank from Qloo";
+  if (n.rankBeyondSample || n.audienceRank > 5000) return `outside this audience's top ${n.rankBeyondSample && n.audienceRank < 5000 ? "1,000" : "5,000"} ${plural}`;
+  return `≈ #${n.audienceRank.toLocaleString("en-US")} of this audience's ${plural}`;
 }
 
 function blankAudience(): AudienceInput {
@@ -604,6 +599,7 @@ function NameCard({
                 <span className="text-ink-3">Hottest namesake</span>
                 <span className="mt-0.5 block truncate text-sm text-ink">{top.name}</span>
                 <span className="text-[10px] uppercase tracking-wide text-ink-3">{DOMAIN_LABEL[top.type] ?? ""} · heat {top.heat.toFixed(2)}</span>
+                <span className="block text-[10px] text-ink-3">{rankText(top)}</span>
               </button>
             ) : (
               <span className="text-ink-2">No namesakes in Qloo&apos;s graph.</span>
@@ -655,12 +651,9 @@ function NameCard({
                     <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-[10px] text-ink-3">
                       <span className="flex items-center gap-1.5">
                         <span className="w-14">audience</span>
-                        <Bar value={n.audienceAffinity} color="var(--accent)" label="Audience affinity" />
+                        <Bar value={n.salience} color="var(--accent)" label="Audience salience" />
                       </span>
-                      <span className="flex items-center gap-1.5">
-                        <span className="w-14">popularity</span>
-                        <Bar value={n.popularity} color="var(--ink-3)" label="Popularity" />
-                      </span>
+                      <span className="text-ink-2">{rankText(n)}</span>
                       <span className="font-mono">{MATCH_LABEL[n.matchKind]}</span>
                     </div>
                   </button>
@@ -721,9 +714,9 @@ function CollisionPanel({
   loading: boolean;
   onClose: () => void;
 }) {
-  const w = DOMAIN_WEIGHT[n.type] ?? 0.5;
-  const a = n.audienceAffinity ?? 0;
-  const p = n.popularity ?? 0;
+  const w = n.proximity;
+  const sal = n.salience ?? 0;
+  const fame = Math.max(0, Math.min(1, ((n.popularity ?? 0) - 0.8) / 0.2));
   return (
     <section className="animate-rise rounded-2xl border border-line-2 bg-panel p-5" aria-label={`Details for ${n.name}`}>
       <div className="flex items-start justify-between gap-3">
@@ -743,13 +736,15 @@ function CollisionPanel({
           <h4 className="text-xs font-semibold uppercase tracking-wider text-ink-3">Why it scores {n.heat.toFixed(2)}</h4>
           <dl className="mt-2 space-y-1.5 text-sm">
             <Row k="Name match" v={`${MATCH_LABEL[n.matchKind]} (${n.similarity.toFixed(2)})`} src="NameRadar string match on Qloo /search results" />
-            <Row k="Audience affinity" v={n.audienceAffinity === null ? "n/a" : a.toFixed(3)} src="Qloo /v2/insights · filter.results.entities" />
-            <Row k="Popularity" v={n.popularity === undefined ? "n/a" : p.toFixed(3)} src="Qloo entity popularity" />
-            <Row k="Domain weight" v={w.toFixed(2)} src="NameRadar prior: how directly this domain competes with a brand" />
+            <Row k="Audience affinity (raw)" v={n.audienceAffinity === null ? "n/a" : n.audienceAffinity.toFixed(3)} src="Qloo /v2/insights · filter.results.entities" />
+            <Row k="Rank in audience's taste" v={rankText(n)} src="Raw affinity placed on this audience's own Qloo ranking for the domain (calibrated live by paging Insights)" />
+            <Row k="Audience salience" v={n.salience === null ? "n/a" : sal.toFixed(2)} src="1 at rank ≤25, 0 at rank ≥5,000 (log scale)" />
+            <Row k="Global fame" v={fame.toFixed(2)} src={`Qloo popularity ${n.popularity?.toFixed(3) ?? "n/a"} rescaled above the 80th percentile`} />
+            <Row k="Domain weight" v={w.toFixed(2)} src="NameRadar prior: how directly this domain competes with a brand (places halved without a launch region)" />
           </dl>
           <p className="mt-3 rounded-lg bg-panel-2 px-3 py-2 font-mono text-[11px] text-ink-2">
-            heat = match × domain × (0.7·affinity + 0.3·popularity)
-            <br />= {n.similarity.toFixed(2)} × {w.toFixed(2)} × (0.7·{a.toFixed(2)} + 0.3·{p.toFixed(2)}) = {n.heat.toFixed(3)}
+            heat = match × domain × (0.75·salience + 0.25·fame)
+            <br />= {n.similarity.toFixed(2)} × {w.toFixed(2)} × (0.75·{sal.toFixed(2)} + 0.25·{fame.toFixed(2)}) = {n.heat.toFixed(3)}
           </p>
         </div>
         <div>

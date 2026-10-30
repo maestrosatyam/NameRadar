@@ -70,7 +70,8 @@ function search(query: string, take: number): MockEntity[] {
 }
 
 function affinity(entityId: string, signals: string): number {
-  return Number(h(`${entityId}|${signals}`).toFixed(4));
+  // map a hash to the same 0.70..0.98 band real Qloo affinities occupy
+  return Number((0.7 + 0.28 * h(`${entityId}|${signals}`)).toFixed(4));
 }
 
 const server = createServer((req, res) => {
@@ -103,6 +104,16 @@ const server = createServer((req, res) => {
       return send(200, { results: { demographics: [{ entity_id: "mock", query: { age, gender: { male: 0.1, female: -0.1 } } }] } });
     }
     const ids = (p.get("filter.results.entities") ?? "").split(",").filter(Boolean);
+    if (!ids.length) {
+      // calibration / recommendation page: synthetic ranked list, affinity falls with log(rank)
+      const take = Number(p.get("take") ?? 20);
+      const page = Number(p.get("page") ?? 1);
+      const entities = Array.from({ length: take }, (_, i) => {
+        const rank = (page - 1) * take + i + 1;
+        return { ...entity(`MOCK ${type.split(":").pop()} #${rank}`, type), query: { affinity: Number((0.98 - 0.065 * Math.log10(rank)).toFixed(4)) } };
+      });
+      return send(200, { results: { entities } });
+    }
     const entities = ids
       .map((id) => registry.get(id))
       .filter((e): e is MockEntity => Boolean(e))

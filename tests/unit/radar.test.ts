@@ -3,7 +3,8 @@ import { QlooClient } from "@/lib/qloo/client";
 import { TtlCache } from "@/lib/qloo/cache";
 import { parseEntities, toInsightsType } from "@/lib/radar/entities";
 import { matchName, normalize } from "@/lib/radar/match";
-import { bandFor, heatOf, resolveAudience, scanName, spellingVariants } from "@/lib/radar/scan";
+import { bandFor, domainWeightFor, HEAT_RED, heatOf, resolveAudience, scanName, spellingVariants } from "@/lib/radar/scan";
+import { clearCalibrationMemo, estimateRank, MAX_RANK, salienceFromRank } from "@/lib/radar/calibrate";
 import { heuristicVariants } from "@/lib/radar/agent";
 import type { ResolvedAudience } from "@/lib/radar/types";
 
@@ -49,25 +50,71 @@ describe("type mapping between /search and Insights vocabularies", () => {
 });
 
 describe("heat scoring", () => {
-  const base = { similarity: 1, type: "urn:entity:brand", popularity: 0.9 };
-  it("is audience-conditional: same namesake, different affinity, different band", () => {
-    expect(bandFor(heatOf(base, 0.95))).toBe("red");
+  const base = { similarity: 1, type: "urn:entity:brand", popularity: 0.97 };
+  it("is audience-conditional: same namesake, different salience, different band", () => {
+    expect(bandFor(heatOf(base, 0.9))).toBe("red");
     // a globally famous namesake the audience doesn't care about is still "crowded", not clear
-    expect(bandFor(heatOf(base, 0.05))).toBe("amber");
-    // a mid-popularity namesake flips all the way from red to green
-    const niche = { ...base, popularity: 0.3 };
-    expect(bandFor(heatOf(niche, 0.95))).toBe("red");
-    expect(bandFor(heatOf(niche, 0.05))).toBe("green");
+    expect(bandFor(heatOf(base, 0))).toBe("amber");
+    // a less famous namesake flips all the way from red to green
+    const niche = { ...base, popularity: 0.75 };
+    expect(bandFor(heatOf(niche, 0.9))).toBe("red");
+    expect(bandFor(heatOf(niche, 0))).toBe("green");
   });
   it("down-weights loose matches and distant domains", () => {
     expect(heatOf({ ...base, similarity: 0.4 }, 0.9)).toBeLessThan(heatOf(base, 0.9));
     expect(heatOf({ ...base, type: "urn:entity:destination" }, 0.9)).toBeLessThan(heatOf(base, 0.9));
   });
-  it("treats a missing affinity as unknown, not as hot", () => {
-    expect(heatOf(base, null)).toBeLessThan(0.5);
+  it("treats a missing audience rank as unknown, not as hot", () => {
+    expect(heatOf(base, null)).toBeLessThan(HEAT_RED);
   });
   it("clamps out-of-range inputs", () => {
     expect(heatOf({ ...base, popularity: 7 }, 3)).toBeLessThanOrEqual(1);
+  });
+  it("halves local places unless a launch region is set", () => {
+    expect(domainWeightFor("urn:entity:place", {})).toBeLessThan(domainWeightFor("urn:entity:place", { region: "Austin" }));
+    expect(domainWeightFor("urn:entity:brand", {})).toBe(1);
+  });
+});
+
+describe("rank calibration", () => {
+  // shape measured live on 2026-10-30 (brands, hip-hop audience)
+  const cal = {
+    type: "urn:entity:brand",
+    points: [
+      { rank: 1, affinity: 0.98 },
+      { rank: 50, affinity: 0.905 },
+      { rank: 200, affinity: 0.864 },
+      { rank: 1000, affinity: 0.789 },
+      { rank: 5000, affinity: 0.686 },
+    ],
+  };
+  it("interpolates rank in log space between samples", () => {
+    const r = estimateRank(0.83, cal)!;
+    expect(r.beyondSample).toBe(false);
+    expect(r.rank).toBeGreaterThan(200);
+    expect(r.rank).toBeLessThan(1000);
+  });
+  it("returns rank 1 at or above the top and extrapolates (capped) below the deepest sample", () => {
+    expect(estimateRank(0.99, cal)!.rank).toBe(1);
+    const deep = estimateRank(0.5, cal)!;
+    expect(deep.beyondSample).toBe(true);
+    expect(deep.rank).toBeLessThanOrEqual(MAX_RANK);
+  });
+  it("is monotonic: higher affinity never yields a worse rank", () => {
+    let prev = 0;
+    for (let a = 0.99; a > 0.6; a -= 0.01) {
+      const r = estimateRank(a, cal)!.rank;
+      expect(r).toBeGreaterThanOrEqual(prev);
+      prev = r;
+    }
+  });
+  it("refuses to estimate from a degenerate calibration", () => {
+    expect(estimateRank(0.8, { type: "x", points: [{ rank: 1, affinity: 0.9 }] })).toBeNull();
+  });
+  it("maps rank to salience on a log scale", () => {
+    expect(salienceFromRank(10)).toBe(1);
+    expect(salienceFromRank(5000)).toBe(0);
+    expect(salienceFromRank(400)).toBeGreaterThan(salienceFromRank(2000));
   });
 });
 
@@ -107,8 +154,20 @@ function mockQloo(affinityFor: (signals: string) => number) {
       return json({ results: [] });
     }
     if (url.pathname === "/v2/insights") {
-      const ids = (p.get("filter.results.entities") ?? "").split(",");
+      const ids = (p.get("filter.results.entities") ?? "").split(",").filter(Boolean);
       const sig = p.get("signal.interests.entities") ?? "";
+      if (!ids.length) {
+        const page = Number(p.get("page") ?? 1);
+        return json({
+          results: {
+            entities: Array.from({ length: 50 }, (_, i) => ({
+              entity_id: `cal-${page}-${i}`,
+              name: "cal",
+              query: { affinity: 0.98 - 0.07 * Math.log10((page - 1) * 50 + i + 1) },
+            })),
+          },
+        });
+      }
       return json({ results: { entities: ids.map((id) => ({ entity_id: id, name: id, query: { affinity: affinityFor(sig) } })) } });
     }
     return new Response("{}", { status: 404 });
@@ -121,7 +180,8 @@ function client(fetchImpl: ReturnType<typeof mockQloo>) {
 
 describe("scan pipeline (MOCK Qloo)", () => {
   it("resolves the audience, finds true namesakes only, and scores them for the audience", async () => {
-    const f = mockQloo(() => 0.9);
+    clearCalibrationMemo();
+  const f = mockQloo(() => 0.97);
     const c = client(f);
     const audience = await resolveAudience(c, { label: "Fans", anchors: ["Fans Love This", "Unknown Thing"] });
     expect(audience.anchors.map((a) => a.id)).toEqual([A1]);
@@ -136,7 +196,8 @@ describe("scan pipeline (MOCK Qloo)", () => {
   });
 
   it("flips verdict when the audience changes (the core Qloo-dependent behaviour)", async () => {
-    const f = mockQloo((sig) => (sig === A1 ? 0.95 : 0.02));
+    clearCalibrationMemo();
+    const f = mockQloo((sig) => (sig === A1 ? 0.97 : 0.6));
     const c = client(f);
     const fans = await resolveAudience(c, { label: "Fans", anchors: ["Fans Love This"] });
     const others: ResolvedAudience = { ...fans, label: "Others", anchors: [{ ...fans.anchors[0], id: "55555555-5555-5555-5555-555555555555" }] };
@@ -157,6 +218,6 @@ describe("scan pipeline (MOCK Qloo)", () => {
     const c = new QlooClient({ apiKey: "k", fetchImpl: f as unknown as typeof fetch, sleep: async () => {}, cache: new TtlCache({ maxEntries: 10, ttlMs: 1e6 }) });
     const scan = await scanName(c, "Tidal", { label: "x", anchors: [{ id: A1, name: "a", type: "urn:entity:artist", rawTypes: [] }], unresolved: [] });
     expect(scan.namesakes[0].audienceAffinity).toBeNull();
-    expect(scan.notes.join(" ")).toMatch(/no audience affinity/);
+    expect(scan.notes.join(" ")).toMatch(/no audience rank/);
   });
 });
