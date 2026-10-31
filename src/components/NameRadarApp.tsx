@@ -847,7 +847,7 @@ function ReportPanel({ state }: { state: RunState }) {
         <h2 className="font-serif text-2xl">Agent recommendation</h2>
         <div className="flex items-center gap-2">
           <span className="rounded border border-line px-2 py-0.5 text-[11px] text-ink-3">
-            planner: {r.planner === "llm-agent" ? "Claude + Qloo tools" : "deterministic (no LLM)"}
+            planner: {r.planner === "llm-agent" ? "Nemotron (Nebius) + Qloo tools" : "deterministic (no LLM)"}
           </span>
           <button type="button" onClick={download} className="rounded-md border border-line px-2.5 py-1 text-xs text-ink-2 hover:text-ink">
             Download memo

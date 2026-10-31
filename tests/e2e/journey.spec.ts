@@ -77,5 +77,5 @@ test("prompt-injection text in the brief is treated as data", async ({ request }
     },
   });
   const body = await res.text();
-  expect(body).not.toMatch(/sk-ant-|You are NameRadar, a brand-naming agent/);
+  expect(body).not.toMatch(/Bearer |You are NameRadar, a brand-naming agent/);
 });

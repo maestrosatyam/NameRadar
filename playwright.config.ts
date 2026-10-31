@@ -30,7 +30,7 @@ export default defineConfig({
           port: 3000,
           reuseExistingServer: true,
           timeout: 300_000,
-          env: { QLOO_API_URL: "http://localhost:4010", QLOO_API_KEY: "mock-key", ANTHROPIC_API_KEY: "" },
+          env: { QLOO_API_URL: "http://localhost:4010", QLOO_API_KEY: "mock-key", NEBIUS_API_KEY: "" },
         },
       ],
 });

@@ -11,13 +11,14 @@
  * containing aggregate metrics plus per-case verdicts and namesake NAMES/types only (no Qloo
  * affinity payloads are written to the repo).
  *
- *   QLOO_API_KEY=... ANTHROPIC_API_KEY=... npm run eval
+ *   QLOO_API_KEY=... NEBIUS_API_KEY=... npm run eval
  *   flags: --no-llm (skip A and D), --agent-subset=N (default 3)
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { QlooClient } from "../src/lib/qloo/client";
 import { llmOnlyVerdict } from "../src/lib/radar/baseline";
 import { runAgent } from "../src/lib/radar/agent";
+import { LLM_MODEL } from "../src/lib/llm/nebius";
 import { normalize, matchName } from "../src/lib/radar/match";
 import { bandFor, findNamesakes, heatOf, pool, resolveAudience, scoreForAudience, summarize } from "../src/lib/radar/scan";
 import { parseEntities } from "../src/lib/radar/entities";
@@ -32,7 +33,7 @@ interface Cases {
 }
 
 const args = new Set(process.argv.slice(2));
-const noLlm = args.has("--no-llm") || !process.env.ANTHROPIC_API_KEY;
+const noLlm = args.has("--no-llm") || !process.env.NEBIUS_API_KEY;
 const agentSubset = Number([...args].find((a) => a.startsWith("--agent-subset="))?.split("=")[1] ?? 3);
 
 const cases = JSON.parse(readFileSync("evals/cases.json", "utf8")) as Cases;
@@ -201,7 +202,7 @@ async function main() {
     casesVersion: cases.version,
     ranAt: new Date().toISOString(),
     durationMs: Date.now() - t0,
-    model: process.env.ANTHROPIC_MODEL ?? "claude-opus-5-5",
+    model: LLM_MODEL,
     audiences: [...audiences.values()].map((a) => ({ label: a.label, resolved: a.anchors.map((x) => x.name), unresolved: a.unresolved })),
     metrics: {
       namesWithAnyNamesake: cases.names.filter((n) => discovered.get(n)!.namesakes.length > 0).length,

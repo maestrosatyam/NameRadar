@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { LLM_MODEL, NebiusClient, type ChatMessage, type ToolCall, type ToolDef } from "../llm/nebius";
 import { z } from "zod";
 import type { QlooClient } from "../qloo/client";
 import { TYPE_LABEL } from "./entities";
@@ -6,7 +6,7 @@ import { inspectCollision, scanName } from "./scan";
 import { normalize } from "./match";
 import type { FinalReport, NameScan, ResolvedAudience, RunEvent, RunRequest, ShortlistItem } from "./types";
 
-export const AGENT_MODEL = process.env.ANTHROPIC_MODEL ?? "claude-opus-5-5";
+export const AGENT_MODEL = LLM_MODEL;
 const MAX_TURNS = 8;
 const MAX_AGENT_NAMES = 12;
 
@@ -61,13 +61,12 @@ const SubmitInput = z.object({
   attorney_questions: z.array(z.string().min(1).max(300)).max(6),
 });
 
-const TOOLS: Anthropic.Tool[] = [
+const TOOL_SPECS = [
   {
     name: "scan_names",
     description:
       "Search Qloo's cultural graph (250M+ entities: brands, music, film, TV, podcasts, games, books, places, people) for namesakes of each candidate brand name, then score every namesake's affinity for THIS target audience with Qloo Insights. Returns a verdict per name: red (a namesake this audience strongly cares about), amber, or green (no strong cultural owner for this audience). Use it for every name you propose; never claim a verdict you did not get from this tool.",
-    strict: true,
-    input_schema: {
+    parameters: {
       type: "object",
       properties: {
         names: {
@@ -84,8 +83,7 @@ const TOOLS: Anthropic.Tool[] = [
     name: "inspect_collision",
     description:
       "For one namesake entity_id returned by scan_names, fetch what it culturally connotes (Qloo taste-analysis tags) and the age/gender skew of its fans compared with the target audience (Qloo demographics). Use it to explain WHY a collision matters.",
-    strict: true,
-    input_schema: {
+    parameters: {
       type: "object",
       properties: { entity_id: { type: "string", description: "An entity_id from a scan_names result." } },
       required: ["entity_id"],
@@ -96,8 +94,7 @@ const TOOLS: Anthropic.Tool[] = [
     name: "submit_report",
     description:
       "Finish. Submit the recommended shortlist (best first) and a short naming memo. Every claim about a namesake must cite entity_ids that appeared in scan_names results. Prefer green names; include an amber name only with a clear caveat. Call this exactly once.",
-    strict: true,
-    input_schema: {
+    parameters: {
       type: "object",
       properties: {
         shortlist: {
@@ -121,6 +118,11 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
 ];
+
+const TOOLS: ToolDef[] = TOOL_SPECS.map(({ name, description, parameters }) => ({
+  type: "function",
+  function: { name, description, parameters },
+}));
 
 const SYSTEM = `You are NameRadar, a brand-naming agent with cultural grounding from Qloo's taste graph.
 
@@ -169,7 +171,23 @@ function knownEntityIds(scans: Map<string, NameScan>): Set<string> {
   return ids;
 }
 
-async function runTool(ctx: AgentContext, block: Anthropic.ToolUseBlock, state: { agentNames: number; report?: FinalReport }): Promise<{ content: string; isError?: boolean }> {
+interface ToolUse {
+  name: string;
+  input: unknown;
+}
+
+/** Tool arguments arrive as a JSON string; invalid JSON becomes `undefined` and fails the tool's Zod check. */
+function toToolUse(call: ToolCall): ToolUse {
+  let input: unknown;
+  try {
+    input = JSON.parse(call.function.arguments || "{}");
+  } catch {
+    input = undefined;
+  }
+  return { name: call.function.name, input };
+}
+
+async function runTool(ctx: AgentContext, block: ToolUse, state: { agentNames: number; report?: FinalReport }): Promise<{ content: string; isError?: boolean }> {
   ctx.emit({ type: "tool_use", tool: block.name, input: block.input });
   if (block.name === "scan_names") {
     const parsed = ScanInput.safeParse(block.input);
@@ -245,52 +263,40 @@ async function runTool(ctx: AgentContext, block: Anthropic.ToolUseBlock, state: 
   return { content: `Unknown tool ${block.name}`, isError: true };
 }
 
-export async function runAgent(ctx: AgentContext): Promise<FinalReport> {
-  const anthropic = new Anthropic({ maxRetries: 2, timeout: 90_000 });
-  const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: briefMessage(ctx) }];
+export async function runAgent(ctx: AgentContext, llm: NebiusClient = new NebiusClient()): Promise<FinalReport> {
+  const messages: ChatMessage[] = [
+    { role: "system", content: SYSTEM },
+    { role: "user", content: briefMessage(ctx) },
+  ];
   const state: { agentNames: number; report?: FinalReport } = { agentNames: 0 };
 
   for (let turn = 0; turn < MAX_TURNS && !state.report; turn++) {
     if (ctx.signal?.aborted) throw new Error("aborted");
-    const response = await anthropic.beta.messages.create(
-      {
-        model: AGENT_MODEL,
-        max_tokens: 16000,
-        system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
-        tools: TOOLS as Anthropic.Beta.BetaTool[],
-        messages,
-        output_config: { effort: (process.env.ANTHROPIC_EFFORT as "low" | "medium" | "high") ?? "low" },
-        betas: ["server-side-fallback-2026-07-01"],
-        fallbacks: "default",
-      } as Anthropic.Beta.MessageCreateParamsNonStreaming,
-      { signal: ctx.signal },
-    );
+    const response = await llm.chat({ messages, tools: TOOLS, maxTokens: 8192, temperature: 0.6, signal: ctx.signal });
     ctx.usage.llmCalls++;
-    ctx.usage.inputTokens += response.usage.input_tokens + (response.usage.cache_read_input_tokens ?? 0);
-    ctx.usage.outputTokens += response.usage.output_tokens;
+    ctx.usage.inputTokens += response.usage.promptTokens;
+    ctx.usage.outputTokens += response.usage.completionTokens;
 
-    if (response.stop_reason === "refusal") throw new Error("The model declined this request.");
-    for (const b of response.content) {
-      if (b.type === "text" && b.text.trim()) ctx.emit({ type: "agent_thought", text: b.text.trim().slice(0, 500) });
-    }
-    messages.push({ role: "assistant", content: response.content });
-    const toolUses = response.content.filter((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === "tool_use");
-    if (toolUses.length === 0) {
-      if (response.stop_reason === "max_tokens") throw new Error("Agent response was truncated.");
+    if (response.content) ctx.emit({ type: "agent_thought", text: response.content.slice(0, 500) });
+    messages.push({
+      role: "assistant",
+      content: response.content || null,
+      ...(response.toolCalls.length ? { tool_calls: response.toolCalls } : {}),
+    });
+    if (response.toolCalls.length === 0) {
+      if (response.finishReason === "length") throw new Error("Agent response was truncated.");
       messages.push({ role: "user", content: "Please finish by calling submit_report." });
       continue;
     }
-    const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
-    for (const tu of toolUses) {
+    for (const call of response.toolCalls) {
       let out: { content: string; isError?: boolean };
       try {
-        out = await runTool(ctx, tu as unknown as Anthropic.ToolUseBlock, state);
+        out = await runTool(ctx, toToolUse(call), state);
       } catch (err) {
         out = { content: `Tool failed: ${(err as Error).message}`, isError: true };
       }
-      results.push({ type: "tool_result", tool_use_id: tu.id, content: out.content, is_error: out.isError });
+      messages.push({ role: "tool", tool_call_id: call.id, content: out.isError ? `ERROR: ${out.content}` : out.content });
     }
-    messages.push({ role: "user", content: results });
   }
   if (!state.report) throw new Error("Agent did not finish within its turn budget.");
   return state.report;

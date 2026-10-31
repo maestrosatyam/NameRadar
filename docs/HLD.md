@@ -6,14 +6,14 @@ Browser (Next.js client)                 Vercel (Node.js functions)             
 NameRadarApp ──POST /api/run──────────▶  run route ──▶ resolveAudience ──GET /search──▶ hackathon.api.qloo.com
   ▲  NDJSON event stream                   │            scanName       ──GET /search──▶   (X-Api-Key, server-only)
   │  (status, qloo_call, scan,             │                           ──GET /v2/insights (filter.results.entities)
-  │   tool_use, final, done)               │            runAgent ──────────────────────▶ Anthropic Messages API
-  │                                        │              tools: scan_names,             (Claude, tool use)
+  │   tool_use, final, done)               │            runAgent ──────────────────────▶ Nebius Token Factory
+  │                                        │              tools: scan_names,             (Nemotron, tool calls)
   │                                        │                     inspect_collision ─GET /v2/insights urn:tag / urn:demographics
   │                                        │                     submit_report
   │                                        └─ fallback: runDeterministic (no LLM)
 AudienceEditor ──GET /api/search────────▶  search route (rate-limited proxy) ──GET /search
 CollisionPanel ──POST /api/inspect──────▶  inspect route ──GET /v2/insights (urn:tag, urn:demographics)
-NameCard ──POST /api/baseline───────────▶  baseline route ──▶ Claude without tools; claims checked via GET /search
+NameCard ──POST /api/baseline───────────▶  baseline route ──▶ same LLM without tools; claims checked via GET /search
                                           health route (GET /api/health): config booleans only
 ```
 
@@ -23,7 +23,7 @@ NameCard ──POST /api/baseline───────────▶  baseline 
 |---|---|---|
 | Qloo client | Only path to Qloo. Hackathon host, `X-Api-Key`, endpoint allow-list, strict parameter validation, bounded retries (429/5xx with capped Retry-After), timeouts, per-run call budget, private TTL/LRU cache, call log for provenance | `src/lib/qloo/client.ts`, `validate.ts`, `cache.ts` |
 | Radar engine | Audience resolution, namesake discovery and matching, audience-conditional scoring, collision inspection | `src/lib/radar/scan.ts`, `match.ts`, `entities.ts` |
-| Agent | Claude tool-use loop with three tools; validates every tool input; verdicts always come from scans; deterministic planner fallback | `src/lib/radar/agent.ts` |
+| Agent | LLM tool-calling loop (Nebius Token Factory, OpenAI-compatible) with three tools; validates every tool input; verdicts always come from scans; deterministic planner fallback | `src/lib/radar/agent.ts` |
 | Baseline | Same model, no tools: the LLM-only control, with each claim checked against Qloo | `src/lib/radar/baseline.ts` |
 | API routes | Zod-validated inputs, rate limits, NDJSON streaming, error mapping | `src/app/api/*/route.ts` |
 | UI | Form, live timeline, radar SVG, namesake drill-down, audience flip, LLM-only comparison, evidence trail, memo export | `src/components/*` |
@@ -32,7 +32,7 @@ NameCard ──POST /api/baseline───────────▶  baseline 
 
 1. **Deterministic first pass** (no LLM): resolve the audience, then scan the user's names. This is
    fast, cheap, reproducible and streamed immediately.
-2. **Agent pass** (Claude via tool use): receives the brief, resolved audience and scans. It
+2. **Agent pass** (LLM via tool calls): receives the brief, resolved audience and scans. It
    decides which collisions to inspect, invents candidate names, and screens them with
    `scan_names`, under a budget of 12 agent names and 8 turns. It finishes with `submit_report`.
    The server rejects reports that cite unscreened names, overwrites each verdict with the scan's
@@ -51,7 +51,7 @@ allows. It is never written to disk or to the repository.
 
 ## Trust boundaries
 
-- Qloo and Anthropic keys exist only in server environment variables.
+- Qloo and Nebius keys exist only in server environment variables.
 - User text (brief, category, names) is untrusted. It is length-limited by Zod, wrapped in
   `<user_brief>` and declared as data in the system prompt, and never interpolated into Qloo
   paths (only into query values, which `URLSearchParams` encodes).
@@ -76,4 +76,4 @@ allows. It is never written to disk or to the repository.
 
 Vercel (Hobby tier, Node.js runtime, `maxDuration` 120 s on `/api/run`). Typical agent run:
 around 25–60 Qloo calls (many cached) and 3–6 LLM calls. Model and effort are set by environment
-variables (`ANTHROPIC_MODEL`, `ANTHROPIC_EFFORT`).
+variables (`NEBIUS_MODEL`, `NEBIUS_THINKING`).

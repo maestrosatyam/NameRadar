@@ -1,4 +1,5 @@
 import { connection } from "next/server";
+import { llmConfigured } from "@/lib/llm/nebius";
 import { AGENT_MODEL } from "@/lib/radar/agent";
 
 export async function GET() {
@@ -8,7 +9,7 @@ export async function GET() {
       ok: true,
       qlooConfigured: Boolean(process.env.QLOO_API_KEY),
       qlooBaseUrl: process.env.QLOO_API_URL ?? "https://hackathon.api.qloo.com",
-      llmConfigured: Boolean(process.env.ANTHROPIC_API_KEY),
+      llmConfigured: llmConfigured(),
       model: AGENT_MODEL,
       commit: (process.env.GIT_COMMIT ?? process.env.VERCEL_GIT_COMMIT_SHA)?.slice(0, 7) ?? null,
       time: new Date().toISOString(),

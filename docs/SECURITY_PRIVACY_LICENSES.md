@@ -2,7 +2,7 @@
 
 ## Secrets
 
-- `QLOO_API_KEY` and `ANTHROPIC_API_KEY` live only in server environment variables (hosting
+- `QLOO_API_KEY` and `NEBIUS_API_KEY` live only in server environment variables (hosting
   provider settings, or a local `.env.local` that is git-ignored). Nothing is prefixed
   `NEXT_PUBLIC_`.
 - The Qloo key is sent only as the `X-Api-Key` header to the configured HTTPS host. The client
@@ -52,6 +52,6 @@
 - Data: Qloo Taste AI API under Qloo's API terms. No Qloo data is redistributed.
 - Fonts: Geist and Geist Mono (SIL OFL 1.1), Instrument Serif (SIL OFL 1.1), served by
   `next/font`.
-- Key dependencies: Next.js (MIT), React (MIT), Zod (MIT), `@anthropic-ai/sdk` (MIT), Tailwind CSS
+- Key dependencies: Next.js (MIT), React (MIT), Zod (MIT), Tailwind CSS
   (MIT), Vitest (MIT), Playwright (Apache-2.0).
 - No third-party images, logos or album art are shown. Namesakes appear as text only.

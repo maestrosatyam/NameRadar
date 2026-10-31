@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { QlooClient } from "@/lib/qloo/client";
+import { llmConfigured } from "@/lib/llm/nebius";
 import { AGENT_MODEL } from "@/lib/radar/agent";
 import { llmOnlyVerdict, verifyClaims, type BaselineResult } from "@/lib/radar/baseline";
 import { clientIp, take, tooMany } from "@/lib/server/ratelimit";
@@ -15,7 +16,7 @@ const Body = z.object({
 
 export async function POST(req: Request) {
   if (!take(`baseline:${clientIp(req)}`, 8, 4)) return tooMany();
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!llmConfigured()) {
     return Response.json({ error: "LLM-only comparison is unavailable: no language model configured." }, { status: 503 });
   }
   const parsed = Body.safeParse(await req.json().catch(() => null));

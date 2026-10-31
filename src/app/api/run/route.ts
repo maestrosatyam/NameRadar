@@ -1,5 +1,6 @@
 import { QlooClient } from "@/lib/qloo/client";
 import { QlooError } from "@/lib/qloo/types";
+import { llmConfigured } from "@/lib/llm/nebius";
 import { runAgent, runDeterministic } from "@/lib/radar/agent";
 import { normalize } from "@/lib/radar/match";
 import { resolveAudience, scanName } from "@/lib/radar/scan";
@@ -64,7 +65,7 @@ export async function POST(req: Request) {
         if (request.mode === "agent") {
           const ctx = { qloo, request, audience, scans, emit, usage, signal: req.signal };
           let report;
-          if (process.env.ANTHROPIC_API_KEY) {
+          if (llmConfigured()) {
             emit({ type: "status", message: "Agent is reviewing the evidence…" });
             try {
               report = await runAgent(ctx);

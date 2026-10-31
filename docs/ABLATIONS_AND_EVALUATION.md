@@ -22,7 +22,7 @@ Run it with `npm run eval` (all arms) or `npm run eval -- --no-llm`.
 | **A: LLM-only** | Same model, same brief, no Qloo; one verdict per (name, audience) plus claimed namesakes, each checked against Qloo `/search` |
 | **B: Registry-only** | Qloo `/search` namesakes scored by match × domain × fame, with **no audience signal**: the equivalent of a string or name-registry check |
 | **C: Qloo scan** | NameRadar's deterministic scan: namesakes plus audience-conditional Insights affinity, calibrated to rank |
-| **D: Full agent** | C plus Claude ideation and screening loop, end to end |
+| **D: Full agent** | C plus LLM ideation and screening loop, end to end |
 
 ## Results (run `ablation-2026-10-30T09-09-10-191Z.json`, 365 Qloo calls, 0 errors, 95 s)
 

@@ -39,7 +39,8 @@ Qloo, with each namesake it claims checked against Qloo.
 4. **Explains collisions**: what the namesake means to its fans (`urn:tag` taste analysis) and
    whether its fans look like yours (`urn:demographics`).
 5. **Fixes the problem**: proposes alternatives and screens every one with Qloo before recommending
-   it. With `ANTHROPIC_API_KEY` set, an LLM tool-use agent does the ideation (`scan_names`,
+   it. With `NEBIUS_API_KEY` set, an LLM tool-calling agent (NVIDIA Nemotron on
+   [Nebius Token Factory](https://tokenfactory.nebius.com)) does the ideation (`scan_names`,
    `inspect_collision`, `submit_report`); otherwise a deterministic planner runs. Either way the
    server rejects unscreened names and locks verdicts to Qloo scans.
 6. **Hands off** a memo with questions for a trademark attorney (Markdown export).
@@ -77,7 +78,7 @@ Design docs: [Product spec](docs/PRODUCT_SPEC.md) · [HLD](docs/HLD.md) · [LLD]
 
 ```bash
 npm install
-cp .env.example .env.local   # add QLOO_API_KEY and, optionally, ANTHROPIC_API_KEY
+cp .env.example .env.local   # add QLOO_API_KEY and, optionally, NEBIUS_API_KEY
 npm run dev                  # http://localhost:3000
 ```
 
