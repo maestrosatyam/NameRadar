@@ -104,8 +104,8 @@ The UI shows every term for any namesake.
 | `inspect_collision` | `{entity_id}` | Accepts only ids returned by earlier scans in this run; returns tags and demographics |
 | `submit_report` | `{shortlist[1..6]{name, rationale, evidence_ids}, memo ≤4000, attorney_questions ≤6}` | Rejects unscreened names; replaces verdicts with scan verdicts; drops evidence ids not seen in this run |
 
-Model `nvidia/Nemotron-3-Ultra-550b-a55b` on Nebius Token Factory (configurable with
-`NEBIUS_MODEL`), called through its OpenAI-compatible `/chat/completions` endpoint with
+Model `nvidia/Nemotron-3_5-Lightning` (the smallest, lowest-cost Nemotron) on Nebius Token
+Factory (configurable with `NEBIUS_MODEL`), called through its OpenAI-compatible `/chat/completions` endpoint with
 function tools. Reasoning is off by default for latency (`NEBIUS_THINKING=true` enables it), and
 any reasoning text is stripped from answers. Tool arguments are parsed as JSON and validated with
 Zod before use. The client retries 429/5xx with bounded backoff. The loop runs at most 8 turns,

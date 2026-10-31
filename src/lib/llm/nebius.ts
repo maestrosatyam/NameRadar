@@ -8,7 +8,7 @@
  */
 
 export const NEBIUS_DEFAULT_BASE_URL = "https://api.tokenfactory.nebius.com/v1";
-export const LLM_MODEL = process.env.NEBIUS_MODEL ?? "nvidia/Nemotron-3-Ultra-550b-a55b";
+export const LLM_MODEL = process.env.NEBIUS_MODEL ?? "nvidia/Nemotron-3_5-Lightning";
 
 const RETRYABLE = new Set([429, 500, 502, 503, 504]);
 const THINK_RE = /<think>[\s\S]*?<\/think>/g;
