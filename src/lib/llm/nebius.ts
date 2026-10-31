@@ -39,6 +39,8 @@ export interface ChatRequest {
   maxTokens?: number;
   temperature?: number;
   tools?: ToolDef[];
+  /** Force a specific tool; default lets the model choose. */
+  forceTool?: string;
   responseFormat?: Record<string, unknown>;
   signal?: AbortSignal;
 }
@@ -123,7 +125,7 @@ export class NebiusClient {
     };
     if (req.tools?.length) {
       body.tools = req.tools;
-      body.tool_choice = "auto";
+      body.tool_choice = req.forceTool ? { type: "function", function: { name: req.forceTool } } : "auto";
     }
     if (req.responseFormat) body.response_format = req.responseFormat;
 

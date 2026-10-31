@@ -210,7 +210,12 @@ async function runTool(ctx: AgentContext, block: ToolUse, state: { agentNames: n
       }
       if (scan) results.push(scanForModel(scan));
     }
-    return { content: JSON.stringify(results) };
+    const greens = [...ctx.scans.values()].filter((s) => s.verdict === "green").length;
+    const hint =
+      greens >= ctx.request.targetClean
+        ? `You now have ${greens} green name(s), enough for the ${ctx.request.targetClean} requested. Call submit_report now.`
+        : `${greens} of ${ctx.request.targetClean} requested green name(s) found so far.`;
+    return { content: JSON.stringify({ results, progress: hint }) };
   }
   if (block.name === "inspect_collision") {
     const parsed = InspectInput.safeParse(block.input);
@@ -272,7 +277,9 @@ export async function runAgent(ctx: AgentContext, llm: NebiusClient = new Nebius
 
   for (let turn = 0; turn < MAX_TURNS && !state.report; turn++) {
     if (ctx.signal?.aborted) throw new Error("aborted");
-    const response = await llm.chat({ messages, tools: TOOLS, maxTokens: 8192, temperature: 0.6, signal: ctx.signal });
+    // Smaller models can keep exploring; the last turn must produce the report.
+    const forceTool = turn === MAX_TURNS - 1 ? "submit_report" : undefined;
+    const response = await llm.chat({ messages, tools: TOOLS, forceTool, maxTokens: 8192, temperature: 0.6, signal: ctx.signal });
     ctx.usage.llmCalls++;
     ctx.usage.inputTokens += response.usage.promptTokens;
     ctx.usage.outputTokens += response.usage.completionTokens;
